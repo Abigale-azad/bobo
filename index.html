@@ -24168,6 +24168,34 @@ filter: drop-shadow(0 4px 6px rgba(0,0,0,0.25));
             </div>
         </div>
 
+        <!-- 卡片 5：云同步 -->
+        <div class="form-card" id="cloudSyncCard">
+            <div class="form-group-row" style="border-bottom: none; padding-bottom: 8px;">
+                <label class="form-label" style="color: #999; font-size: 12px;">云同步 (Firebase)</label>
+            </div>
+            <div class="form-group-row" id="cloudSyncStatus" style="padding-top: 0;">
+                <label class="form-label">状态</label>
+                <span style="color: #999; font-size: 13px;" id="cloudSyncStatusText">未配置</span>
+            </div>
+            <div class="form-group-row clickable" onclick="openCloudSyncConfig()">
+                <label class="form-label" style="color: #007aff;">配置云同步</label>
+                <div class="form-value-display"><i class="ri-arrow-right-s-line"></i></div>
+            </div>
+            <div class="form-group-row clickable" onclick="if(window.CloudSync)CloudSync.manualSync()" id="cloudSyncForceBtn" style="display:none;">
+                <label class="form-label">手动同步</label>
+                <div class="form-value-display"><i class="ri-refresh-line"></i></div>
+            </div>
+            <div class="form-group-row clickable" onclick="document.getElementById('cloudSyncFileInput').click()" id="cloudSyncUploadBtn" style="display:none;">
+                <label class="form-label" style="color: #007aff;">上传备份文件 (.json.gz)</label>
+                <div class="form-value-display"><i class="ri-upload-2-line"></i></div>
+            </div>
+            <input type="file" id="cloudSyncFileInput" accept=".gz,.json,.json.gz" style="display:none;" onchange="uploadCloudBackup(this.files[0])">
+            <div class="form-group-row clickable" onclick="openCloudSyncClearConfirm()" id="cloudSyncClearBtn" style="display:none;">
+                <label class="form-label" style="color: #ff3b30;">清空云端数据</label>
+                <div class="form-value-display"><i class="ri-arrow-right-s-line"></i></div>
+            </div>
+        </div>
+
     </div>
 </div>
             
@@ -25337,7 +25365,39 @@ onchange="handleFriendAvatarUpload(event)"><span id="friendAvatarPreview">+</spa
     </div>
 <!-- ▲▲▲ 剪切到这里结束 ▲▲▲ -->
 
-<!-- ▼▼▼ 步骤一：在这里粘贴“火星模式”的完整 HTML 结构 ▼▼▼ -->
+<!-- CloudSync 配置弹窗 -->
+<div id="cloudSyncConfigModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-title">配置云同步</div>
+        <div style="padding: 10px 0; color: #666; font-size: 13px; line-height: 1.6;">
+            使用 Firebase 实现聊天记录的云端同步。配置后每次保存数据将自动同步到云端，换设备或清缓存后可自动恢复。
+            <br><br>
+            获取方式：访问 <a href="https://console.firebase.google.com/" target="_blank" style="color: #007aff;">Firebase 控制台</a> → 创建项目 → 添加 Web 应用 → 复制配置信息。
+        </div>
+        <div class="form-group-row">
+            <label class="form-label">apiKey</label>
+            <input type="text" class="form-input" id="syncApiKey" placeholder="AIza...">
+        </div>
+        <div class="form-group-row">
+            <label class="form-label">projectId</label>
+            <input type="text" class="form-input" id="syncProjectId" placeholder="jrsy-sync-xxxx">
+        </div>
+        <div class="form-group-row">
+            <label class="form-label">appId (可选)</label>
+            <input type="text" class="form-input" id="syncAppId" placeholder="1:xxx:web:xxx">
+        </div>
+        <div class="form-group-row">
+            <label class="form-label">messagingSenderId (可选)</label>
+            <input type="text" class="form-input" id="syncSenderId" placeholder="xxxxxxxxxx">
+        </div>
+        <div class="modal-buttons" style="margin-top: 20px;">
+            <button class="modal-btn modal-btn-cancel" onclick="closeCloudSyncConfig()">取消</button>
+            <button class="modal-btn modal-btn-confirm" onclick="saveCloudSyncConfig()">保存并启用</button>
+        </div>
+    </div>
+</div>
+
+<!-- ▼▼▼ 步骤一：在这里粘贴"火星模式"的完整 HTML 结构 ▼▼▼ -->
 <div id="marsModeScreen" class="page">
     <!-- 将聊天.txt的body内所有内容复制到这里 -->
     <input type="file" id="top-panel-bg-input" class="hidden-file-input" accept="image/*">
@@ -41003,7 +41063,7 @@ if (importedData.stickerGroups) {
 function openClearDataConfirm() {
     showConfirm("您确定要清空所有数据吗？此操作将删除所有好友、聊天记录和设置，且无法恢复。", async (confirmed) => {
         if (confirmed) {
-            // 如果用户点击了“确定”
+            // 如果用户点击了"确定"
             showAlert('正在清空数据，应用即将刷新...');
             await initDefaultData(); // 调用已有的数据重置函数
             setTimeout(() => {
@@ -41012,6 +41072,118 @@ function openClearDataConfirm() {
         }
     });
 }
+
+// ===== CloudSync 配置相关函数 =====
+
+function openCloudSyncConfig() {
+    const modal = document.getElementById('cloudSyncConfigModal');
+    if (!modal) return;
+    // 回填已有配置（优先 localStorage，其次默认配置）
+    try {
+        let config = null;
+        const existing = localStorage.getItem('jrsy_firebase_config');
+        if (existing) {
+            config = JSON.parse(existing);
+        } else if (window.CloudSync && CloudSync.DEFAULT_CONFIG) {
+            config = CloudSync.DEFAULT_CONFIG;
+        }
+        if (config) {
+            document.getElementById('syncApiKey').value = config.apiKey || '';
+            document.getElementById('syncProjectId').value = config.projectId || '';
+            document.getElementById('syncAppId').value = config.appId || '';
+            document.getElementById('syncSenderId').value = config.messagingSenderId || '';
+        }
+    } catch (e) {}
+    modal.style.display = 'flex';
+}
+
+function closeCloudSyncConfig() {
+    const modal = document.getElementById('cloudSyncConfigModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveCloudSyncConfig() {
+    const apiKey = document.getElementById('syncApiKey').value.trim();
+    const projectId = document.getElementById('syncProjectId').value.trim();
+    const appId = document.getElementById('syncAppId').value.trim();
+    const messagingSenderId = document.getElementById('syncSenderId').value.trim();
+
+    if (!apiKey || !projectId) {
+        showAlert('请至少填写 apiKey 和 projectId');
+        return;
+    }
+
+    const config = { apiKey, projectId, appId, messagingSenderId };
+    localStorage.setItem('jrsy_firebase_config', JSON.stringify(config));
+    closeCloudSyncConfig();
+
+    showToast('正在连接云端...');
+
+    // 尝试初始化云同步
+    try {
+        if (window.CloudSync) {
+            const success = await CloudSync.init(config);
+            if (success) {
+                showToast('云同步已启用');
+            } else {
+                showAlert('云同步初始化失败，请检查配置信息和网络连接');
+            }
+        }
+    } catch (e) {
+        showAlert('云同步初始化失败: ' + e.message);
+    }
+    updateCloudSyncUI();
+}
+
+function updateCloudSyncUI() {
+    const statusText = document.getElementById('cloudSyncStatusText');
+    const forceBtn = document.getElementById('cloudSyncForceBtn');
+    const clearBtn = document.getElementById('cloudSyncClearBtn');
+    const uploadBtn = document.getElementById('cloudSyncUploadBtn');
+
+    const hasLocalConfig = !!localStorage.getItem('jrsy_firebase_config');
+    const hasDefaultConfig = window.CloudSync && CloudSync.DEFAULT_CONFIG && CloudSync.DEFAULT_CONFIG.apiKey;
+    const isInitialized = window.CloudSync && CloudSync.initialized;
+
+    if (statusText) {
+        if (isInitialized) {
+            statusText.textContent = '\u5df2\u8fde\u63a5 - \u81ea\u52a8\u540c\u6b65\u4e2d';
+            statusText.style.color = '#34c759';
+        } else if (hasLocalConfig || hasDefaultConfig) {
+            statusText.textContent = '\u5df2\u914d\u7f6e - \u7b49\u5f85\u8fde\u63a5...';
+            statusText.style.color = '#ff9500';
+        } else {
+            statusText.textContent = '\u672a\u914d\u7f6e';
+            statusText.style.color = '#999';
+        }
+    }
+    if (forceBtn) forceBtn.style.display = isInitialized ? '' : 'none';
+    if (clearBtn) clearBtn.style.display = isInitialized ? '' : 'none';
+    if (uploadBtn) uploadBtn.style.display = isInitialized ? '' : 'none';
+}
+
+async function uploadCloudBackup(file) {
+    if (!file) return;
+    if (!window.CloudSync || !CloudSync.enabled) {
+        showToast('\u8bf7\u5148\u542f\u7528\u4e91\u540c\u6b65');
+        return;
+    }
+    showToast('\u6b63\u5728\u4e0a\u4f20\u5907\u4efd\u6587\u4ef6\uff0c\u8bf7\u8010\u5fc3\u7b49\u5f85...');
+    await CloudSync.uploadBackupFile(file);
+    document.getElementById('cloudSyncFileInput').value = '';
+}
+
+function openCloudSyncClearConfirm() {
+    showConfirm('确定要清空云端存储的所有数据吗？此操作不可恢复。', async (confirmed) => {
+        if (confirmed && window.CloudSync) {
+            await CloudSync.clearCloudData();
+            showToast('云端数据已清空');
+        }
+    });
+}
+
+// 页面初始化时更新云端同步 UI
+setTimeout(updateCloudSyncUI, 3000);
         // --- Listen Together Functions ---
         
                         // --- ↓↓↓ 请从这里开始完整复制，替换旧的 inviteToListenTogether 函数 ↓↓↓ ---
@@ -43179,6 +43351,30 @@ window.onload = async function() {
         updateFriendList();
         updateTime();
         setActivePage('homeScreen');
+
+        // ===== CloudSync 初始化 =====
+        try {
+            if (window.CloudSync) {
+                // 优先使用用户自定义配置，否则用内置默认配置
+                let config = null;
+                const savedConfig = localStorage.getItem('jrsy_firebase_config');
+                if (savedConfig) {
+                    try { config = JSON.parse(savedConfig); } catch (e) {}
+                }
+                if (!config || !config.apiKey) {
+                    config = CloudSync.DEFAULT_CONFIG;
+                }
+                if (config && config.apiKey && config.projectId) {
+                    const ok = await CloudSync.init(config);
+                    if (ok) {
+                        console.log('[App] CloudSync 已启动');
+                        updateCloudSyncUI();
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[App] CloudSync 初始化失败:', e.message);
+        }
 
 checkPeriodReminder(); 
 
@@ -79002,6 +79198,11 @@ async function unbindLoverRelationship(event, friendId) {
       <script src="notebook-plugin.js"></script>
       <script src="transmigrate-plugin.js"></script>
       <script src="draw-guess-plugin.js"></script>
+<!-- CloudSync: Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- Storage SDK 已移除，改用 Firestore 分片存储 -->
+<script src="jrsy-sync.js"></script>
 </body>
 </html>
 
